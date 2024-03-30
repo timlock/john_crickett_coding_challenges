@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Resp {
     SimpleString(String),
@@ -21,6 +23,59 @@ impl TryFrom<&[u8]> for Resp {
             }
             _ => Err(()),
         }
+    }
+}
+impl Display for Resp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+impl From<&Resp> for String {
+    fn from(value: &Resp) -> Self {
+        let mut string = String::new();
+        let clrf = "\r\n";
+        match value {
+            Resp::SimpleString(s) => {
+                string += "+";
+                string += clrf;
+                string += s.as_str();
+                string += clrf;
+            }
+            Resp::SimpleError(e) => {
+                string += "-";
+                string += clrf;
+                string += e.as_str();
+                string += clrf;
+            }
+            Resp::Integer(i) => {
+                string += ":";
+                string += clrf;
+                string += i.to_string().as_str();
+                string += clrf;
+            }
+            Resp::BulkString(b) => {
+                string += "$";
+                string += b.len().to_string().as_str();
+                string += clrf;
+                string += b.as_str();
+                string += clrf;
+            }
+            Resp::Array(a) => {
+                string += "*";
+                string += a.len().to_string().as_str();
+                string += clrf;
+                for i in a {
+                    string += String::from(i).as_str();
+                    string += clrf;
+                }
+            }
+            Resp::Null => {
+                string += "*";
+                string += "-1";
+                string += clrf;
+            }
+        }
+        string
     }
 }
 
