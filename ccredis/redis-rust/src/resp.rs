@@ -79,6 +79,66 @@ impl From<&Resp> for String {
     }
 }
 
+impl From<Resp> for Vec<u8> {
+    fn from(value: Resp) -> Self {
+        let mut bytes = Vec::new();
+        let clrf = b"\r\n";
+        match value {
+            Resp::SimpleString(s) => {
+                bytes.push(b'+');
+                bytes.extend_from_slice(clrf);
+                bytes.extend_from_slice(s.as_bytes());
+                bytes.extend_from_slice(clrf);
+            }
+            Resp::SimpleError(s) => {
+                bytes.push(b'-');
+                bytes.extend_from_slice(clrf);
+                bytes.extend_from_slice(s.as_bytes());
+                bytes.extend_from_slice(clrf);
+
+            }
+            Resp::Integer(i) => {
+                bytes.push(b':');
+                bytes.extend_from_slice(clrf);
+                bytes.extend_from_slice(&i.to_be_bytes());
+                bytes.extend_from_slice(clrf);
+            }
+            Resp::BulkString(b) => {
+                bytes.push(b'$');
+                bytes.extend_from_slice(clrf);
+                bytes.extend_from_slice(&b.len().to_be_bytes());
+                bytes.extend_from_slice(clrf);
+                bytes.extend_from_slice(b.as_bytes());
+                bytes.extend_from_slice(clrf);
+            }
+            Resp::Array(a) => {
+             bytes.push(b'*');
+                bytes.extend_from_slice(clrf);
+                bytes.extend_from_slice(&a.len().to_be_bytes());
+                bytes.extend_from_slice(clrf);
+                for i in a{
+                bytes.extend_from_slice(i.into::<Vec<u8>>().as_bytes());
+                bytes.extend_from_slice(clrf);
+                }
+
+                bytes += b'*';
+                bytes += a.len().as_bytes();
+                bytes += clrf;
+                for i in a {
+                    bytes += Vec<u8>::from(i);
+                    bytes += clrf;
+                }
+            }
+            Resp::Null => {
+                bytes += b'*';
+                bytes += b'-1';
+                bytes += clrf;
+            }
+        }
+        bytes
+        }
+    }
+
 fn parse_resp(value: &[u8]) -> (Option<Resp>, &[u8]) {
     if value.is_empty() {
         return (None, value);

@@ -1,4 +1,6 @@
+use redis_rust::serve;
+
 
 fn main() {
-    println!("Hello, world!");
+    serve();
 }
