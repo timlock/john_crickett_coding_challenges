@@ -27,7 +27,7 @@ impl TryFrom<&[u8]> for Resp {
 }
 impl Display for Resp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{}", String::from(self))
     }
 }
 impl From<&Resp> for String {
@@ -37,19 +37,16 @@ impl From<&Resp> for String {
         match value {
             Resp::SimpleString(s) => {
                 string += "+";
-                string += clrf;
                 string += s.as_str();
                 string += clrf;
             }
             Resp::SimpleError(e) => {
                 string += "-";
-                string += clrf;
                 string += e.as_str();
                 string += clrf;
             }
             Resp::Integer(i) => {
                 string += ":";
-                string += clrf;
                 string += i.to_string().as_str();
                 string += clrf;
             }
@@ -86,20 +83,16 @@ impl From<Resp> for Vec<u8> {
         match value {
             Resp::SimpleString(s) => {
                 bytes.push(b'+');
-                bytes.extend_from_slice(clrf);
                 bytes.extend_from_slice(s.as_bytes());
                 bytes.extend_from_slice(clrf);
             }
             Resp::SimpleError(s) => {
                 bytes.push(b'-');
-                bytes.extend_from_slice(clrf);
                 bytes.extend_from_slice(s.as_bytes());
                 bytes.extend_from_slice(clrf);
-
             }
             Resp::Integer(i) => {
                 bytes.push(b':');
-                bytes.extend_from_slice(clrf);
                 bytes.extend_from_slice(&i.to_be_bytes());
                 bytes.extend_from_slice(clrf);
             }
@@ -111,33 +104,22 @@ impl From<Resp> for Vec<u8> {
                 bytes.extend_from_slice(b.as_bytes());
                 bytes.extend_from_slice(clrf);
             }
-            Resp::Array(a) => {
-             bytes.push(b'*');
+            Resp::Array(resps) => {
+                bytes.push(b'*');
                 bytes.extend_from_slice(clrf);
-                bytes.extend_from_slice(&a.len().to_be_bytes());
+                bytes.extend_from_slice(&resps.len().to_be_bytes());
                 bytes.extend_from_slice(clrf);
-                for i in a{
-                bytes.extend_from_slice(i.into::<Vec<u8>>().as_bytes());
-                bytes.extend_from_slice(clrf);
-                }
-
-                bytes += b'*';
-                bytes += a.len().as_bytes();
-                bytes += clrf;
-                for i in a {
-                    bytes += Vec<u8>::from(i);
-                    bytes += clrf;
+                for resp in resps {
+                    let serialized = Vec::from(resp);
+                    bytes.extend_from_slice(&serialized);
+                    bytes.extend_from_slice(clrf);
                 }
             }
-            Resp::Null => {
-                bytes += b'*';
-                bytes += b'-1';
-                bytes += clrf;
-            }
+            Resp::Null => bytes.extend_from_slice(b"*-1\r\n"),
         }
         bytes
-        }
     }
+}
 
 fn parse_resp(value: &[u8]) -> (Option<Resp>, &[u8]) {
     if value.is_empty() {
