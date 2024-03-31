@@ -1,3 +1,3 @@
-pub mod request;
+pub mod command;
 pub mod resp;
 pub mod server;

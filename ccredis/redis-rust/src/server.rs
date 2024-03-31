@@ -1,10 +1,9 @@
 use std::{
-    error::Error,
     io::{BufReader, Read, Write},
     net::{TcpListener, TcpStream},
 };
 
-use crate::{request::Request, resp::Resp};
+use crate::{command::Command, resp::Resp};
 
 pub struct Server {
     address: String,
@@ -15,7 +14,7 @@ impl Server {
     }
     pub fn serve<F>(&self, callback: F)
     where
-        F: Fn(Request) -> Resp,
+        F: Fn(Command) -> Resp,
     {
         let listener = TcpListener::bind(&self.address).unwrap();
         for stream in listener.incoming() {
@@ -26,7 +25,6 @@ impl Server {
                     continue;
                 }
             };
-            println!("Connection established!");
             let resp = match self.read_resp(&mut stream) {
                 Ok(resp) => resp,
                 Err(err) => {
@@ -34,8 +32,7 @@ impl Server {
                     continue;
                 }
             };
-            println!("Received: {resp}");
-            let request = match Request::try_from(resp) {
+            let request = match Command::try_from(resp) {
                 Ok(r) => r,
                 Err(err) => {
                     println!("{err}");
@@ -43,11 +40,10 @@ impl Server {
                 }
             };
             let response = callback(request);
-            println!("Respond with: {response}");
             let serialized = Vec::from(response);
-            stream
-                .write_all(&serialized)
-                .map_err(|err| println!("{err}"));
+            if let Err(err) = stream.write_all(&serialized) {
+                println!("{err}");
+            }
         }
     }
     fn read_resp(&self, stream: &mut TcpStream) -> Result<Resp, &'static str> {
@@ -59,7 +55,6 @@ impl Server {
                 Ok(size) => size,
                 Err(_) => return Err("Encountered error while reading"),
             };
-            println!("Read {size} bytes");
             buffer.extend_from_slice(&buf[..size]);
             if size < 1024 {
                 break;

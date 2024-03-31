@@ -1,4 +1,4 @@
-use redis_rust::request::Request;
+use redis_rust::command::Command;
 use redis_rust::resp::Resp;
 use redis_rust::server::Server;
 
@@ -8,11 +8,10 @@ fn main() {
     server.serve(|command| {
         println!("Received {command:?}");
         match command {
-            Request::Ping => Resp::SimpleString("PONG".to_string()),
-            _ => {
-                println!("should not be reached");
-                Resp::SimpleError("Unkown command".to_string())
-            }
+            Command::Ping => Resp::SimpleString("PONG".to_string()),
+            Command::Echo(s) => Resp::SimpleString(s),
+            Command::Get(_) => todo!(),
+            Command::Set(_) => todo!(),
         }
     })
 }
