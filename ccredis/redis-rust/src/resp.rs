@@ -319,7 +319,7 @@ mod tests {
     fn parse_simple_string() -> Result<(), &'static str> {
         let input = "+OK\r\n";
         match parse_resp(input.as_bytes()) {
-            (Some(Resp::SimpleString(s)), r) => {
+            (Some(Resp::SimpleString(s)), _) => {
                 assert_eq!(s, "OK");
                 Ok(())
             }
@@ -330,7 +330,7 @@ mod tests {
     fn parse_simple_error() -> Result<(), &'static str> {
         let input = "-ERROR message\r\n";
         match parse_resp(input.as_bytes()) {
-            (Some(Resp::SimpleError(s)), r) => {
+            (Some(Resp::SimpleError(s)), _) => {
                 assert_eq!(s, "ERROR message");
                 Ok(())
             }
@@ -342,7 +342,7 @@ mod tests {
     fn parse_empty_bulk_string() -> Result<(), &'static str> {
         let input = "$0\r\n\r\n";
         match parse_resp(input.as_bytes()) {
-            (Some(Resp::BulkString(s)), r) => {
+            (Some(Resp::BulkString(s)), _) => {
                 assert_eq!(s, "");
                 Ok(())
             }
@@ -353,7 +353,7 @@ mod tests {
     fn parse_simple_string2() -> Result<(), &'static str> {
         let input = "+hello world\r\n";
         match parse_resp(input.as_bytes()) {
-            (Some(Resp::SimpleString(s)), r) => {
+            (Some(Resp::SimpleString(s)), _) => {
                 assert_eq!(s, "hello world");
                 Ok(())
             }
