@@ -12,9 +12,9 @@ impl Server {
     pub fn new(address: String) -> Self {
         Server { address }
     }
-    pub fn serve<F>(&self, callback: F) -> Result<(), io::Error>
+    pub fn serve<F>(&self, mut callback: F) -> Result<(), io::Error>
     where
-        F: Fn(Command) -> Resp,
+        F: FnMut(Command) -> Resp,
     {
         let listener = TcpListener::bind(&self.address)?;
         for stream in listener.incoming() {

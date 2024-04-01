@@ -11,11 +11,17 @@ pub enum Resp {
 }
 
 impl Resp {
+    pub fn ok() -> Resp{
+        Resp::SimpleString(String::from("OK"))
+    }
     pub fn unkown_command(command: &str) -> Resp {
         Resp::SimpleError(format!("Unkown command '{command}'"))
     }
 
     pub fn wrong_number_of_arguments() -> Resp {
+        Resp::SimpleError(String::from("ERR wrong number of arguments for command"))
+    }
+    pub fn invalid_arguments() -> Resp {
         Resp::SimpleError(String::from("ERR wrong number of arguments for command"))
     }
 }
