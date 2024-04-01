@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Resp {
@@ -8,6 +8,16 @@ pub enum Resp {
     BulkString(String),
     Array(Vec<Resp>),
     Null,
+}
+
+impl Resp {
+    pub fn unkown_command(command: &str) -> Resp {
+        Resp::SimpleError(format!("Unkown command '{command}'"))
+    }
+
+    pub fn wrong_number_of_arguments() -> Resp {
+        Resp::SimpleError(String::from("ERR wrong number of arguments for command"))
+    }
 }
 impl TryFrom<&[u8]> for Resp {
     type Error = ();
@@ -63,7 +73,6 @@ impl From<&Resp> for String {
                 string += clrf;
                 for i in a {
                     string += String::from(i).as_str();
-                    string += clrf;
                 }
             }
             Resp::Null => {
@@ -98,21 +107,18 @@ impl From<Resp> for Vec<u8> {
             }
             Resp::BulkString(b) => {
                 bytes.push(b'$');
-                bytes.extend_from_slice(clrf);
-                bytes.extend_from_slice(&b.len().to_be_bytes());
+                bytes.extend_from_slice(b.len().to_string().as_bytes());
                 bytes.extend_from_slice(clrf);
                 bytes.extend_from_slice(b.as_bytes());
                 bytes.extend_from_slice(clrf);
             }
             Resp::Array(resps) => {
                 bytes.push(b'*');
-                bytes.extend_from_slice(clrf);
-                bytes.extend_from_slice(&resps.len().to_be_bytes());
+                bytes.extend_from_slice(resps.len().to_string().as_bytes());
                 bytes.extend_from_slice(clrf);
                 for resp in resps {
                     let serialized = Vec::from(resp);
                     bytes.extend_from_slice(&serialized);
-                    bytes.extend_from_slice(clrf);
                 }
             }
             Resp::Null => bytes.extend_from_slice(b"*-1\r\n"),
@@ -278,6 +284,10 @@ mod tests {
     #[test]
     fn parse_array2() -> Result<(), &'static str> {
         let input = "*2\r\n$4\r\necho\r\n$11\r\nhello world\r\n";
+        let (actual, r) = parse_resp(input.as_bytes());
+        assert!(actual.is_some());
+        assert!(r.is_empty());
+        assert_eq!(input, actual.unwrap().to_string());
         match parse_resp(input.as_bytes()) {
             (Some(Resp::Array(arr)), r) => {
                 assert!(r.is_empty());

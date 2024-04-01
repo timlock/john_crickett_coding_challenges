@@ -29,7 +29,9 @@ impl Server {
                 Ok(command) => {
                     println!("Received {command:?}");
                     let response = callback(command);
+                    println!("Send {:?}", response.to_string());
                     let serialized = Vec::from(response);
+                    println!("Serialized {serialized:?}");
                     if let Err(err) = stream.write_all(&serialized) {
                         println!("{err}");
                     }
@@ -41,10 +43,10 @@ impl Server {
     }
 }
 
-fn parse_command(stream: &mut TcpStream) -> Result<Command, &'static str> {
+fn parse_command(stream: &mut TcpStream) -> Result<Command, String> {
     let received_bytes = read_all(stream).map_err(|_| "Failed to read byte from tcp stream")?;
     let resp = Resp::try_from(received_bytes.as_slice()).map_err(|_| "Could not parse resp")?;
-    Command::try_from(resp)
+    Command::try_from(resp).map_err(|err| err.to_string())
 }
 fn read_all(stream: &mut TcpStream) -> Result<Vec<u8>, io::Error> {
     let mut buf_reader = BufReader::new(stream);
