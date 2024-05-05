@@ -1,21 +1,30 @@
 use std::{
     io::{self, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
+    sync::{Arc, Mutex},
+    thread,
 };
 
 use crate::{command::Command, resp::Resp};
 
+use self::threadpool::ThreadPool;
+mod threadpool;
 pub struct Server {
     address: String,
+    thread_pool: ThreadPool,
 }
 impl Server {
-    pub fn new(address: String) -> Self {
-        Server { address }
+    pub fn new(address: String, thread_pool_size: usize) -> Self {
+        Server {
+            address,
+            thread_pool: ThreadPool::new(thread_pool_size),
+        }
     }
     pub fn handle<F>(&self, mut callback: F) -> Result<(), io::Error>
     where
-        F: FnMut(Command) -> Resp,
+        F: FnMut(Command) -> Resp + Send + 'static,
     {
+        let callback = Arc::new(Mutex::new(callback));
         let listener = TcpListener::bind(&self.address)?;
         for stream in listener.incoming() {
             let mut stream = match stream {
@@ -25,7 +34,8 @@ impl Server {
                     continue;
                 }
             };
-            loop {
+            let callback = callback.clone();
+            self.thread_pool.execute(move || loop {
                 println!("");
                 match parse_command(&mut stream) {
                     Ok(commands) => {
@@ -34,7 +44,7 @@ impl Server {
                         }
                         for command in commands {
                             println!("Received {command:?}");
-                            let response = callback(command);
+                            let response = callback.as_ref().lock().unwrap()(command);
                             println!("Send {:?}", response.to_string());
                             let serialized = Vec::from(response);
                             println!("Serialized {serialized:?}");
@@ -48,7 +58,7 @@ impl Server {
                         break;
                     }
                 };
-            }
+            });
         }
         Ok(())
     }
