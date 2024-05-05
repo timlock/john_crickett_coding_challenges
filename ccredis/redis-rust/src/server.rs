@@ -22,9 +22,8 @@ impl Server {
     }
     pub fn handle<F>(&self, mut callback: F) -> Result<(), io::Error>
     where
-        F: FnMut(Command) -> Resp + Send + 'static,
+        F: FnMut(Command) -> Resp + Send + 'static + Clone,
     {
-        let callback = Arc::new(Mutex::new(callback));
         let listener = TcpListener::bind(&self.address)?;
         for stream in listener.incoming() {
             let mut stream = match stream {
@@ -34,20 +33,20 @@ impl Server {
                     continue;
                 }
             };
-            let callback = callback.clone();
+            let mut callback = callback.clone();
             self.thread_pool.execute(move || loop {
-                println!("");
+                // println!("");
                 match parse_command(&mut stream) {
                     Ok(commands) => {
                         if commands.is_empty() {
                             break;
                         }
                         for command in commands {
-                            println!("Received {command:?}");
-                            let response = callback.as_ref().lock().unwrap()(command);
-                            println!("Send {:?}", response.to_string());
+                            // println!("Received {command:?}");
+                            let response = callback(command);
+                            // println!("Send {:?}", response.to_string());
                             let serialized = Vec::from(response);
-                            println!("Serialized {serialized:?}");
+                            // println!("Serialized {serialized:?}");
                             if let Err(err) = stream.write_all(&serialized) {
                                 println!("{err}");
                             }
@@ -66,10 +65,10 @@ impl Server {
 
 fn parse_command(stream: &mut TcpStream) -> Result<Vec<Command>, String> {
     let received_bytes = read_all(stream).map_err(|_| "Failed to read byte from tcp stream")?;
-    println!(
-        "Stream in  {:?}",
-        String::from_utf8_lossy(received_bytes.as_slice())
-    );
+    // println!(
+    //     "Stream in  {:?}",
+    //     String::from_utf8_lossy(received_bytes.as_slice())
+    // );
     let resps = Resp::parse(&received_bytes).map_err(|_| "Could not parse resp")?;
     let mut commands = Vec::new();
     for resp in resps {
