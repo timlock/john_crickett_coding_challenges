@@ -1,4 +1,4 @@
-use std::{fmt::Display};
+use std::fmt::Display;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Resp {
@@ -11,7 +11,7 @@ pub enum Resp {
 }
 
 impl Resp {
-    pub fn ok() -> Resp{
+    pub fn ok() -> Resp {
         Resp::SimpleString(String::from("OK"))
     }
     pub fn unkown_command(command: &str) -> Resp {
@@ -24,23 +24,28 @@ impl Resp {
     pub fn invalid_arguments() -> Resp {
         Resp::SimpleError(String::from("ERR wrong number of arguments for command"))
     }
-}
-impl TryFrom<&[u8]> for Resp {
-    type Error = ();
 
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        match parse_resp(value) {
-            (Some(resp), r) => {
-                if r.is_empty() {
-                    Ok(resp)
-                } else {
-                    Err(())
+    pub fn parse(bytes: &[u8]) -> Result<Vec<Resp>, Resp> {
+        let mut remaining = bytes;
+        let mut resps = Vec::new();
+        loop {
+            match parse_resp(remaining) {
+                (Some(resp), r) => {
+                    remaining = r;
+                    resps.push(resp);
+                }
+                (None, r) => {
+                    if r.is_empty() {
+                        return Ok(resps);
+                    }
+                    return Err(Resp::unkown_command(&String::from_utf8_lossy(bytes)));
                 }
             }
-            _ => Err(()),
         }
     }
 }
+
+
 impl Display for Resp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", String::from(self))
@@ -108,7 +113,7 @@ impl From<Resp> for Vec<u8> {
             }
             Resp::Integer(i) => {
                 bytes.push(b':');
-                bytes.extend_from_slice(&i.to_be_bytes());
+                bytes.extend_from_slice(&i.to_string().as_bytes());
                 bytes.extend_from_slice(clrf);
             }
             Resp::BulkString(b) => {
@@ -188,7 +193,7 @@ fn parse_array(value: &[u8]) -> (Option<Resp>, &[u8]) {
     let length = length.unwrap() as usize;
     let mut array = Vec::with_capacity(length);
     let mut contents = remaining;
-    loop {
+    for _ in 0..length {
         match parse_resp(contents) {
             (Some(resp), r) => {
                 array.push(resp);
@@ -202,6 +207,7 @@ fn parse_array(value: &[u8]) -> (Option<Resp>, &[u8]) {
             }
         }
     }
+    (Some(Resp::Array(array)), contents)
 }
 
 fn parse_bulk_string(value: &[u8]) -> (Option<Resp>, &[u8]) {
@@ -320,11 +326,54 @@ mod tests {
                 assert_eq!(arr.len(), 2);
                 match &arr[0] {
                     Resp::BulkString(s) => assert_eq!(s, "get"),
-                    _ => return Err("Array should contain a simple string"),
+                    _ => return Err("Array should contain a bulk string"),
                 }
                 match &arr[1] {
                     Resp::BulkString(s) => assert_eq!(s, "key"),
-                    _ => return Err("Array should contain a simple string"),
+                    _ => return Err("Array should contain a bulk string"),
+                }
+                Ok(())
+            }
+            _ => Err("Should be of type array"),
+        }
+    }
+    #[test]
+    fn parse_array4() -> Result<(), &'static str> {
+        let input ="*3\r\n$6\r\nCONFIG\r\n$3\r\nGET\r\n$4\r\nsave\r\n*3\r\n$6\r\nCONFIG\r\n$3\r\nGET\r\n$10\r\nappendonly\r\n";
+        match parse_resp(input.as_bytes()) {
+            (Some(Resp::Array(arr)), r) => {
+                assert_eq!(arr.len(), 3);
+                match &arr[0] {
+                    Resp::BulkString(s) => assert_eq!(s, "CONFIG"),
+                    _ => return Err("Expected bulk string"),
+                }
+                match &arr[1] {
+                    Resp::BulkString(s) => assert_eq!(s, "GET"),
+                    _ => return Err("Expected bulk string"),
+                }
+                match &arr[2] {
+                    Resp::BulkString(s) => assert_eq!(s, "save"),
+                    _ => return Err("Expected bulk string"),
+                }
+                assert!(!r.is_empty());
+                match parse_resp(r) {
+                    (Some(Resp::Array(arr)), r) => {
+                        assert_eq!(arr.len(), 3);
+                        assert!(r.is_empty());
+                        match &arr[0] {
+                            Resp::BulkString(s) => assert_eq!(s, "CONFIG"),
+                            _ => return Err("Expected bulk string"),
+                        }
+                        match &arr[1] {
+                            Resp::BulkString(s) => assert_eq!(s, "GET"),
+                            _ => return Err("Expected bulk string"),
+                        }
+                        match &arr[2] {
+                            Resp::BulkString(s) => assert_eq!(s, "appendonly"),
+                            _ => return Err("Expected bulk string"),
+                        }
+                    }
+                    _ => return Err("Should be of type array"),
                 }
                 Ok(())
             }

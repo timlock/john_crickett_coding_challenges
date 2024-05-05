@@ -43,11 +43,21 @@ impl Server {
     }
 }
 
-fn parse_command(stream: &mut TcpStream) -> Result<Command, String> {
+fn parse_command(stream: &mut TcpStream) -> Result<Vec<Command>, String> {
     let received_bytes = read_all(stream).map_err(|_| "Failed to read byte from tcp stream")?;
-    let resp = Resp::try_from(received_bytes.as_slice()).map_err(|_| "Could not parse resp")?;
-    Command::try_from(resp).map_err(|err| err.to_string())
+    println!(
+        "Stream in  {:?}",
+        String::from_utf8_lossy(received_bytes.as_slice())
+    );
+    let resps = Resp::parse(&received_bytes).map_err(|_| "Could not parse resp")?;
+    let mut commands = Vec::new();
+    for resp in resps {
+        let command = Command::try_from(resp).map_err(|err| err.to_string())?;
+        commands.push(command);
+    }
+    Ok(commands)
 }
+
 fn read_all(stream: &mut TcpStream) -> Result<Vec<u8>, io::Error> {
     let mut buf_reader = BufReader::new(stream);
     let mut buffer = Vec::new();
