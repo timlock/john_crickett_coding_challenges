@@ -8,7 +8,7 @@ fn main() -> Result<(), std::io::Error> {
     let address = String::from("127.0.0.1:6379");
     let server = Server::new(address);
     let mut dictonary: HashMap<String, String> = HashMap::new();
-    server.serve(|command| match command {
+    server.handle(|command| match command {
         Command::Ping => Resp::SimpleString("PONG".to_string()),
         Command::Echo(s) => Resp::BulkString(s),
         Command::Get(key) => match dictonary.get(&key) {

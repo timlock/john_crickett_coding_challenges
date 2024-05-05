@@ -12,7 +12,7 @@ impl Server {
     pub fn new(address: String) -> Self {
         Server { address }
     }
-    pub fn serve<F>(&self, mut callback: F) -> Result<(), io::Error>
+    pub fn handle<F>(&self, mut callback: F) -> Result<(), io::Error>
     where
         F: FnMut(Command) -> Resp,
     {
@@ -25,19 +25,30 @@ impl Server {
                     continue;
                 }
             };
-            match parse_command(&mut stream) {
-                Ok(command) => {
-                    println!("Received {command:?}");
-                    let response = callback(command);
-                    println!("Send {:?}", response.to_string());
-                    let serialized = Vec::from(response);
-                    println!("Serialized {serialized:?}");
-                    if let Err(err) = stream.write_all(&serialized) {
-                        println!("{err}");
+            loop {
+                println!("");
+                match parse_command(&mut stream) {
+                    Ok(commands) => {
+                        if commands.is_empty() {
+                            break;
+                        }
+                        for command in commands {
+                            println!("Received {command:?}");
+                            let response = callback(command);
+                            println!("Send {:?}", response.to_string());
+                            let serialized = Vec::from(response);
+                            println!("Serialized {serialized:?}");
+                            if let Err(err) = stream.write_all(&serialized) {
+                                println!("{err}");
+                            }
+                        }
                     }
-                }
-                Err(err) => println!("{err}"),
-            };
+                    Err(err) => {
+                        println!("{err}");
+                        break;
+                    }
+                };
+            }
         }
         Ok(())
     }
