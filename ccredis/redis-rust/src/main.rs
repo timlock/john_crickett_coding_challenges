@@ -19,5 +19,6 @@ fn main() -> Result<(), std::io::Error> {
             dictonary.insert(key, value);
             Resp::ok()
         }
+        Command::ConfigGet => Resp::Integer(0),
     })
 }

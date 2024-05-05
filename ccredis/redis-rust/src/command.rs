@@ -6,6 +6,7 @@ pub enum Command {
     Echo(String),
     Get(String),
     Set { key: String, value: String },
+    ConfigGet,
 }
 
 impl TryFrom<Resp> for Command {
@@ -34,6 +35,7 @@ fn create_command(mut arr: Vec<Resp>) -> Result<Command, Resp> {
         "ECHO" => create_echo(arr),
         "GET" => create_get(arr),
         "SET" => create_set(arr),
+        "CONFIG" => Ok(Command::ConfigGet),
         _ => Err(Resp::unkown_command(&name)),
     }
 }
