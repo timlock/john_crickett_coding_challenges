@@ -1,89 +1,127 @@
 use std::{
+    collections::HashMap,
     io::{self, BufReader, Read, Write},
-    net::{TcpListener, TcpStream},
-    sync::{Arc, Mutex},
+    net::{SocketAddr, TcpListener, TcpStream},
+    sync::mpsc::{self, Receiver, Sender},
     thread,
 };
 
 use crate::{command::Command, resp::Resp};
 
-use self::threadpool::ThreadPool;
-mod threadpool;
 pub struct Server {
     address: String,
-    thread_pool: ThreadPool,
 }
 impl Server {
-    pub fn new(address: String, thread_pool_size: usize) -> Self {
-        Server {
-            address,
-            thread_pool: ThreadPool::new(thread_pool_size),
-        }
+    pub fn new(address: String) -> Self {
+        Server { address }
     }
-    pub fn handle<F>(&self, mut callback: F) -> Result<(), io::Error>
-    where
-        F: FnMut(Command) -> Resp + Send + 'static + Clone,
-    {
+    
+    pub fn start(
+        &self,
+    ) -> Result<
+        (
+            Receiver<(u32, Command, SocketAddr)>,
+            HashMap<u32, Sender<(SocketAddr, Resp)>>,
+        ),
+        io::Error,
+    > {
         let listener = TcpListener::bind(&self.address)?;
-        for stream in listener.incoming() {
-            let mut stream = match stream {
-                Ok(s) => s,
-                Err(e) => {
-                    println!("{e}");
-                    continue;
-                }
-            };
-            let mut callback = callback.clone();
-            self.thread_pool.execute(move || loop {
-                // println!("");
-                match parse_command(&mut stream) {
-                    Ok(commands) => {
-                        if commands.is_empty() {
-                            break;
+        listener.set_nonblocking(true).unwrap();
+        let mut channels = HashMap::new();
+        let (sender, receiver) = mpsc::channel();
+        let threads = (0..1)
+            .map(|id| {
+                let listener = listener.try_clone().unwrap();
+                let sender = sender.clone();
+                let (c_sender, c_receiver) = mpsc::channel();
+                channels.insert(id, c_sender);
+                thread::spawn(move || {
+                    let id = id;
+                    let mut connections = HashMap::new();
+                    loop {
+                        let result = match listener.accept() {
+                            Ok((stream, address)) => Some((stream, address)),
+                            Err(err) => match err.kind() {
+                                io::ErrorKind::WouldBlock => None,
+                                _ => {
+                                    println!("{err}");
+                                    break;
+                                }
+                            },
+                        };
+                        if let Some((stream, address)) = result {
+                            println!("New Connection {address} total {}", connections.len());
+                            stream.set_nonblocking(true).unwrap();
+                            connections.insert(address, BufReader::new(stream));
                         }
-                        for command in commands {
-                            // println!("Received {command:?}");
-                            let response = callback(command);
-                            // println!("Send {:?}", response.to_string());
+                        let mut disconnected = Vec::new();
+                        for (address, stream) in connections.iter_mut() {
+                            match try_read(stream) {
+                                Ok(bytes) => match parse(&bytes) {
+                                    Ok(commands) => {
+                                        for command in commands {
+                                            sender.send((id, command, address.clone())).unwrap();
+                                        }
+                                    }
+                                    Err(err) => {
+                                        println!("{err}");
+                                        // TODO inform client
+                                    }
+                                },
+                                Err(err) => {
+                                    disconnected.push(address.clone());
+                                    println!("{err}");
+                                }
+                            }
+                        }
+                        for address in disconnected {
+                            connections.remove(&address);
+                        }
+                        while let Ok((address, response)) = c_receiver.try_recv() {
                             let serialized = Vec::from(response);
-                            // println!("Serialized {serialized:?}");
-                            if let Err(err) = stream.write_all(&serialized) {
+                            let stream = connections.get_mut(&address).unwrap();
+                            if let Err(err) = stream.get_mut().write_all(&serialized) {
                                 println!("{err}");
                             }
                         }
                     }
-                    Err(err) => {
-                        println!("{err}");
-                        break;
-                    }
-                };
-            });
-        }
-        Ok(())
+                    println!("Thread is closed");
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok((receiver, channels))
     }
 }
 
-fn parse_command(stream: &mut TcpStream) -> Result<Vec<Command>, String> {
-    let received_bytes = read_all(stream).map_err(|_| "Failed to read byte from tcp stream")?;
-    // println!(
-    //     "Stream in  {:?}",
-    //     String::from_utf8_lossy(received_bytes.as_slice())
-    // );
-    let resps = Resp::parse(&received_bytes).map_err(|_| "Could not parse resp")?;
+//TODO check if data is incomplete and return incomplete data
+fn parse(data: &[u8]) -> Result<Vec<Command>, Resp> {
+    let resps = Resp::parse(data)?;
     let mut commands = Vec::new();
     for resp in resps {
-        let command = Command::try_from(resp).map_err(|err| err.to_string())?;
+        let command = Command::try_from(resp)?;
         commands.push(command);
     }
     Ok(commands)
 }
-
-fn read_all(stream: &mut TcpStream) -> Result<Vec<u8>, io::Error> {
-    let mut buf_reader = BufReader::new(stream);
+fn try_read(buf_reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>, io::Error> {
     let mut buffer = Vec::new();
     loop {
         let mut buf = [0; 1024];
-        let size = buf_reader.read(&mut buf)?;
+        let size = match buf_reader.read(&mut buf) {
+            Ok(size) => {
+                if size == 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        "Connection closed",
+                    ));
+                }
+                size
+            }
+            Err(err) => match err.kind() {
+                io::ErrorKind::WouldBlock => return Ok(buffer),
+                _ => return Err(err),
+            },
+        };
         buffer.extend_from_slice(&buf[..size]);
         if size < 1024 {
             break;
