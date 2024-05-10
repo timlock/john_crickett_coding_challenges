@@ -15,81 +15,66 @@ impl Server {
     pub fn new(address: String) -> Self {
         Server { address }
     }
-    
     pub fn start(
         &self,
-    ) -> Result<
-        (
-            Receiver<(u32, Command, SocketAddr)>,
-            HashMap<u32, Sender<(SocketAddr, Resp)>>,
-        ),
-        io::Error,
-    > {
+    ) -> Result<(Receiver<(Command, SocketAddr)>, Sender<(SocketAddr, Resp)>), io::Error> {
         let listener = TcpListener::bind(&self.address)?;
-        listener.set_nonblocking(true).unwrap();
-        let mut channels = HashMap::new();
+        listener.set_nonblocking(true)?;
         let (sender, receiver) = mpsc::channel();
-        let threads = (0..1)
-            .map(|id| {
-                let listener = listener.try_clone().unwrap();
-                let sender = sender.clone();
-                let (c_sender, c_receiver) = mpsc::channel();
-                channels.insert(id, c_sender);
-                thread::spawn(move || {
-                    let id = id;
-                    let mut connections = HashMap::new();
-                    loop {
-                        let result = match listener.accept() {
-                            Ok((stream, address)) => Some((stream, address)),
-                            Err(err) => match err.kind() {
-                                io::ErrorKind::WouldBlock => None,
-                                _ => {
-                                    println!("{err}");
-                                    break;
-                                }
-                            },
-                        };
-                        if let Some((stream, address)) = result {
-                            println!("New Connection {address} total {}", connections.len());
-                            stream.set_nonblocking(true).unwrap();
-                            connections.insert(address, BufReader::new(stream));
+        let (c_sender, c_receiver) = mpsc::channel();
+        let _parser_thread = thread::spawn(move || {
+            let mut connections = HashMap::new();
+            loop {
+                let result = match listener.accept() {
+                    Ok((stream, address)) => Some((stream, address)),
+                    Err(err) => match err.kind() {
+                        io::ErrorKind::WouldBlock => None,
+                        _ => {
+                            println!("{err}");
+                            break;
                         }
-                        let mut disconnected = Vec::new();
-                        for (address, stream) in connections.iter_mut() {
-                            match try_read(stream) {
-                                Ok(bytes) => match parse(&bytes) {
-                                    Ok(commands) => {
-                                        for command in commands {
-                                            sender.send((id, command, address.clone())).unwrap();
-                                        }
-                                    }
-                                    Err(err) => {
-                                        println!("{err}");
-                                        // TODO inform client
-                                    }
-                                },
-                                Err(err) => {
-                                    disconnected.push(address.clone());
-                                    println!("{err}");
+                    },
+                };
+                if let Some((stream, address)) = result {
+                    println!("New Connection {address} total {}", connections.len());
+                    stream.set_nonblocking(true).unwrap();
+                    connections.insert(address, BufReader::new(stream));
+                }
+                let mut disconnected = Vec::new();
+                for (address, stream) in connections.iter_mut() {
+                    match try_read(stream) {
+                        Ok(bytes) => match parse(&bytes) {
+                            Ok(commands) => {
+                                for command in commands {
+                                    sender.send((command, address.clone())).unwrap();
                                 }
                             }
-                        }
-                        for address in disconnected {
-                            connections.remove(&address);
-                        }
-                        while let Ok((address, response)) = c_receiver.try_recv() {
-                            let serialized = Vec::from(response);
-                            let stream = connections.get_mut(&address).unwrap();
-                            if let Err(err) = stream.get_mut().write_all(&serialized) {
+                            Err(err) => {
+                                disconnected.push(address.clone());
                                 println!("{err}");
                             }
+                        },
+                        Err(err) => {
+                            disconnected.push(address.clone());
+                            println!("{err}");
                         }
                     }
-                    println!("Thread is closed");
-                })
-            })
-            .collect::<Vec<_>>();
-        Ok((receiver, channels))
+                }
+                for address in disconnected {
+                    connections.remove(&address);
+                }
+                while let Ok((address, response)) = c_receiver.try_recv() {
+                    let serialized = Vec::from(response);
+                    let stream = connections.get_mut(&address).unwrap();
+                    if let Err(err) = stream.get_mut().write_all(&serialized) {
+                        println!("{err}");
+                    }
+                }
+            }
+            println!("Thread is closed");
+        });
+
+        Ok((receiver, c_sender))
     }
 }
 

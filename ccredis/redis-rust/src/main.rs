@@ -8,8 +8,8 @@ fn main() -> Result<(), std::io::Error> {
     let address = String::from("127.0.0.1:6379");
     let server = Server::new(address);
     let mut dictionary: HashMap<String, String> = HashMap::new();
-    let (receiver, threads) = server.start()?;
-    while let Ok((id, command, address)) = receiver.recv() {
+    let (receiver, sender) = server.start()?;
+    while let Ok((command, address)) = receiver.recv() {
         let response = match command {
             Command::Ping => Resp::SimpleString("PONG".to_string()),
             Command::Echo(s) => Resp::BulkString(s),
@@ -23,7 +23,7 @@ fn main() -> Result<(), std::io::Error> {
             }
             Command::ConfigGet => Resp::Integer(0),
         };
-        threads.get(&id).unwrap().send((address, response)).unwrap();
+        sender.send((address, response)).unwrap();
     }
     Ok(())
 }
