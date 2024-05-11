@@ -7,30 +7,31 @@ use std::{
 use crate::{command::Command, resp::Resp};
 
 pub struct Server {
-    address: String,
+    listener: TcpListener,
+    connections: HashMap<SocketAddr, BufReader<TcpStream>>,
 }
 impl Server {
-    pub fn new(address: String) -> Self {
-        Server { address }
+    pub fn new(address: &str) -> io::Result<Self> {
+        let listener = TcpListener::bind(address)?;
+        listener.set_nonblocking(true)?;
+        Ok(Server {
+            listener,
+            connections: HashMap::new(),
+        })
     }
 
-    pub fn handle<F>(&self, mut callback: F) -> Result<(), io::Error>
+    pub fn handle<F>(&mut self, mut callback: F)
     where
         F: FnMut(Command) -> Resp,
     {
-        let listener = TcpListener::bind(&self.address)?;
-        listener.set_nonblocking(true)?;
-        let mut connections = HashMap::new();
         loop {
-            let result = try_accept(&listener);
+            let result = try_accept(&self.listener);
             if let Some((stream, address)) = result {
-                println!("New Connection {address} total {}", connections.len());
                 stream.set_nonblocking(true).unwrap();
-                connections.insert(address, BufReader::new(stream));
+                self.connections.insert(address, BufReader::new(stream));
             }
-
             let mut disconnected = Vec::new();
-            for (address, stream) in connections.iter_mut() {
+            for (address, stream) in self.connections.iter_mut() {
                 match try_read(stream) {
                     Ok(bytes) => match parse(&bytes) {
                         Ok(commands) => {
@@ -54,23 +55,20 @@ impl Server {
                 }
             }
             for address in disconnected {
-                connections.remove(&address);
+                self.connections.remove(&address);
             }
         }
-        Ok(())
     }
 }
 fn try_accept(listener: &TcpListener) -> Option<(TcpStream, SocketAddr)> {
-    match listener.accept() {
-        Ok((stream, address)) => Some((stream, address)),
-        Err(err) => match err.kind() {
-            io::ErrorKind::WouldBlock => None,
-            _ => {
-                println!("{err}");
-                None
+    listener
+        .accept()
+        .map_err(|err| {
+            if err.kind() != io::ErrorKind::WouldBlock {
+                println!("{err}")
             }
-        },
-    }
+        })
+        .ok()
 }
 
 //TODO check if data is incomplete buffer incomplete data and discard corrupted data
@@ -83,28 +81,27 @@ fn parse(data: &[u8]) -> Result<Vec<Command>, Resp> {
     }
     Ok(commands)
 }
-fn try_read(buf_reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>, io::Error> {
-    let mut buffer = Vec::new();
+
+fn try_read(buf_reader: &mut BufReader<TcpStream>) -> io::Result<Vec<u8>> {
+    const CHUNK_SIZE: usize = 1028;
+    let mut buffer = Vec::with_capacity(CHUNK_SIZE);
+    let mut buf = [0; CHUNK_SIZE];
     loop {
-        let mut buf = [0; 1024];
-        let size = match buf_reader.read(&mut buf) {
-            Ok(size) => {
-                if size == 0 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::ConnectionAborted,
-                        "Connection closed",
-                    ));
-                }
-                size
+        match buf_reader.read(&mut buf) {
+            Ok(size) if size == 0 => {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "Connection closed",
+                ))
             }
-            Err(err) => match err.kind() {
-                io::ErrorKind::WouldBlock => return Ok(buffer),
-                _ => return Err(err),
-            },
-        };
-        buffer.extend_from_slice(&buf[..size]);
-        if size < 1024 {
-            break;
+            Ok(size) => {
+                buffer.extend_from_slice(&buf[..size]);
+                if size < CHUNK_SIZE {
+                    break;
+                }
+            }
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
+            Err(err) => return Err(err),
         }
     }
     Ok(buffer)
