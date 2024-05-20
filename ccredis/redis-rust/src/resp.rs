@@ -45,7 +45,6 @@ impl Resp {
     }
 }
 
-
 impl Display for Resp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", String::from(self))

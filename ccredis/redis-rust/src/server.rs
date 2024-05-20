@@ -2,19 +2,47 @@ use std::{
     collections::HashMap,
     io::{self, BufReader, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
-    os::unix::net::SocketAddr,
-    sync::mpsc::{self, Sender},
+    sync::mpsc::{self, Receiver, Sender},
     thread::{self, JoinHandle},
 };
 
 use crate::{command::Command, resp::Resp, worker::Worker};
 
+pub struct ServerThread {
+    server: Option<Server>,
+    sender: Option<Sender<()>>,
+    join_handle: Option<JoinHandle<()>>,
+}
+impl ServerThread {
+    pub fn new(server: Server) -> Self {
+        Self {
+            server: Some(server),
+            sender: None,
+            join_handle: None,
+        }
+    }
+    pub fn start(&mut self) {
+        if let Some(mut server) = self.server.take() {
+            let (sender, receiver) = mpsc::channel();
+            self.sender = Some(sender);
+            self.join_handle = Some(thread::spawn(move || server.start(receiver)));
+            println!("started server");
+        }
+    }
+}
+impl Drop for ServerThread {
+    fn drop(&mut self) {
+        drop(self.sender.take());
+        if let Some(join_handle) = self.join_handle.take() {
+            join_handle.join().unwrap();
+            println!("stopped server");
+        }
+    }
+}
 pub struct Server {
     listener: TcpListener,
     connections: HashMap<SocketAddr, BufReader<TcpStream>>,
     worker: Worker,
-    sender: Option<Sender<()>>,
-    handle: Option<JoinHandle<()>>,
 }
 impl Server {
     pub fn new(address: &str, worker: Worker) -> io::Result<Self> {
@@ -24,64 +52,16 @@ impl Server {
             listener,
             connections: HashMap::new(),
             worker,
-            sender: None,
-            handle: None,
         })
     }
-    pub fn start_non_blocking(&mut self) {
-        let (sender, receiver) = mpsc::channel();
-        self.sender = Some(sender);
-        self.handle = Some(thread::spawn(move || loop {
-            let result = try_accept(&self.listener);
-            if let Some((stream, address)) = result {
-                stream.set_nonblocking(true).unwrap();
-                self.connections.insert(address, BufReader::new(stream));
-            }
-            let mut disconnected = Vec::new();
-            for (address, stream) in self.connections.iter_mut() {
-                match try_read(stream) {
-                    Ok(bytes) => match parse(&bytes) {
-                        Ok(commands) => {
-                            for command in commands {
-                                let response = self.worker.handle_command(command);
-                                let serialized = Vec::from(response);
-                                if let Err(err) = stream.get_mut().write_all(&serialized) {
-                                    println!("{err}");
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            disconnected.push(*address);
-                            println!("{err}");
-                        }
-                    },
-                    Err(err) => {
-                        disconnected.push(*address);
-                        println!("{err}");
-                    }
-                }
-            }
-            for address in disconnected {
-                self.connections.remove(&address);
-            }
-        }));
-    }
-    pub fn new(address: &str) -> io::Result<Self> {
-        let listener = TcpListener::bind(address)?;
-        listener.set_nonblocking(true)?;
-        Ok(Server {
-            listener,
-            connections: HashMap::new(),
-        })
-    }
-
-    pub fn handle<F>(&mut self, mut callback: F)
-    where
-        F: FnMut(Command) -> Resp,
-    {
+    pub fn start(&mut self, receiver: Receiver<()>) {
         loop {
+            if let Err(mpsc::TryRecvError::Disconnected) = receiver.try_recv() {
+                break;
+            }
             let result = try_accept(&self.listener);
             if let Some((stream, address)) = result {
+                println!("new connection: {address}");
                 stream.set_nonblocking(true).unwrap();
                 self.connections.insert(address, BufReader::new(stream));
             }
@@ -91,7 +71,9 @@ impl Server {
                     Ok(bytes) => match parse(&bytes) {
                         Ok(commands) => {
                             for command in commands {
-                                let response = callback(command);
+                                println!("Received command {command:?}");
+                                let response = self.worker.handle_command(command);
+                                println!("Sending response {response}");
                                 let serialized = Vec::from(response);
                                 if let Err(err) = stream.get_mut().write_all(&serialized) {
                                     println!("{err}");
@@ -115,6 +97,7 @@ impl Server {
         }
     }
 }
+
 fn try_accept(listener: &TcpListener) -> Option<(TcpStream, SocketAddr)> {
     listener
         .accept()
@@ -162,36 +145,60 @@ fn try_read(buf_reader: &mut BufReader<TcpStream>) -> io::Result<Vec<u8>> {
     Ok(buffer)
 }
 mod tests {
-    use redis::Commands;
+    use std::error::Error;
+
+    use redis::{Commands, RedisError};
+
+    use crate::dictionary::Dictionary;
 
     use super::*;
+    struct TestCase {
+        command: Box<dyn FnOnce(&mut redis::Connection) -> redis::RedisResult<redis::Value>>,
+        want: redis::Value,
+    }
 
     #[test]
-    fn parse_null() -> Result<(), &'static str> {
-        struct TestCase<F>
-        where
-            F: FnOnce(&mut redis::Connection),
-        {
-            commands: Vec<F>,
-            want: Command,
-        };
-        let tests = HashMap::from([(
-            "Happypath",
-            TestCase {
-                commands: vec![|connection: &mut redis::Connection| {
-                    assert!(connection
-                        .set::<&str, &str, String>("test", "value")
-                        .is_ok());
+    fn set_value() -> Result<(), Box<dyn Error>> {
+        let tests = HashMap::from([
+            (
+                "Happypath",
+                vec![
+                    TestCase {
+                        command: Box::new(|connection: &mut redis::Connection| {
+                            connection.set("test", "value")
+                        }),
+                        want: redis::Value::Okay,
+                    },
+                    TestCase {
+                        command: Box::new(|connection: &mut redis::Connection| {
+                            connection.get("test")
+                        }),
+                        want: redis::Value::Data(b"value".into()),
+                    },
+                ],
+            ),
+            (
+                "unkown key",
+                vec![TestCase {
+                    command: Box::new(|connection: &mut redis::Connection| connection.get("test")),
+                    want: redis::Value::Nil,
                 }],
-                want: Command::Ping,
-            },
-        )]);
-        for (name, test) in tests {
+            ),
+        ]);
+        for (name, commands) in tests {
+            println!("Test: {name}");
             let address = "127.0.0.1:6379";
-            let server = Server::new(address).unwrap();
+            let mut server =
+                ServerThread::new(Server::new(address, Worker::new(Dictionary::new()))?);
+            server.start();
+            let address = "redis://127.0.0.1:6379";
+            let client = redis::Client::open(address)?;
+            let mut connection = client.get_connection()?;
 
-            let client = redis::Client::open(address).unwrap();
-            let connection = client.get_connection().unwrap();
+            for command in commands {
+                let resp = (command.command)(&mut connection)?;
+                assert_eq!(resp, command.want, "assertion failed for test: {name}");
+            }
         }
         Ok(())
     }

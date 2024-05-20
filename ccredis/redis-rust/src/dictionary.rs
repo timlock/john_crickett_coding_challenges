@@ -3,10 +3,10 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-pub struct Dictonary<V> {
+pub struct Dictionary<V> {
     inner: HashMap<String, Entry<V>>,
 }
-impl<V> Dictonary<V> {
+impl<V> Dictionary<V> {
     pub fn new() -> Self {
         Self {
             inner: HashMap::new(),
@@ -83,8 +83,8 @@ impl ExpireRule {
         match self {
             ExpireRule::EX(s) => SystemTime::now().checked_add(*s),
             ExpireRule::PX(ms) => SystemTime::now().checked_add(*ms),
-            ExpireRule::EXAT(t) => Some(t.clone()),
-            ExpireRule::PXAT(t) => Some(t.clone()),
+            ExpireRule::EXAT(t) => Some(*t),
+            ExpireRule::PXAT(t) => Some(*t),
             ExpireRule::KEEPTTL => None,
         }
     }

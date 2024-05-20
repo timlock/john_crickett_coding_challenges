@@ -7,6 +7,7 @@ pub enum Command {
     Get(String),
     Set { key: String, value: String },
     ConfigGet,
+    Client,
 }
 
 impl TryFrom<Resp> for Command {
@@ -30,12 +31,13 @@ impl TryFrom<Vec<Resp>> for Command {
 
 fn create_command(mut arr: Vec<Resp>) -> Result<Command, Resp> {
     let name = command_name(&mut arr)?;
-    match name.as_str() {
+    match name.to_uppercase().as_str() {
         "PING" => Ok(Command::Ping),
         "ECHO" => create_echo(arr),
         "GET" => create_get(arr),
         "SET" => create_set(arr),
         "CONFIG" => Ok(Command::ConfigGet),
+        "CLIENT" => Ok(Command::Client),
         _ => Err(Resp::unkown_command(&name)),
     }
 }

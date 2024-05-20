@@ -1,14 +1,15 @@
-
 use crate::{
-    command::Command, dictonary::{self, Dictonary}, resp::Resp
+    command::Command,
+    dictionary::{self, Dictionary},
+    resp::Resp,
 };
 
 pub struct Worker {
-    dictionary: Dictonary<String>,
+    dictionary: Dictionary<String>,
 }
 
 impl Worker {
-    pub fn new(dictonary: Dictonary<String>) -> Self {
+    pub fn new(dictonary: Dictionary<String>) -> Self {
         Self {
             dictionary: dictonary,
         }
@@ -22,10 +23,11 @@ impl Worker {
                 None => Resp::Null,
             },
             Command::Set { key, value } => {
-                self.dictionary.insert(key, value);
+                self.dictionary.set(key, value, None, false, None);
                 Resp::ok()
             }
             Command::ConfigGet => Resp::Integer(0),
+            Command::Client => Resp::ok(),
         }
     }
 }

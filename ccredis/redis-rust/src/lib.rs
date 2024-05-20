@@ -1,5 +1,5 @@
 pub mod command;
 pub mod resp;
 pub mod server;
-pub mod dictonary;
+pub mod dictionary;
 pub mod worker;
