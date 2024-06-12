@@ -5,6 +5,7 @@ use std::{
     sync::mpsc::{self, Receiver, Sender},
     thread::{self, JoinHandle},
 };
+use std::io::BufRead;
 
 use crate::{command::Command, resp::Resp, worker::Worker};
 
@@ -13,6 +14,7 @@ pub struct ServerThread {
     sender: Option<Sender<()>>,
     join_handle: Option<JoinHandle<()>>,
 }
+
 impl ServerThread {
     pub fn new(server: Server) -> Self {
         Self {
@@ -30,6 +32,7 @@ impl ServerThread {
         }
     }
 }
+
 impl Drop for ServerThread {
     fn drop(&mut self) {
         drop(self.sender.take());
@@ -39,11 +42,13 @@ impl Drop for ServerThread {
         }
     }
 }
+
 pub struct Server {
     listener: TcpListener,
     connections: HashMap<SocketAddr, BufReader<TcpStream>>,
     worker: Worker,
 }
+
 impl Server {
     pub fn new(address: &str, worker: Worker) -> io::Result<Self> {
         let listener = TcpListener::bind(address)?;
@@ -109,6 +114,30 @@ fn try_accept(listener: &TcpListener) -> Option<(TcpStream, SocketAddr)> {
         .ok()
 }
 
+pub struct RespStream {
+    inner: BufReader<TcpStream>,
+    buffer: Vec<u8>,
+}
+
+impl RespStream {
+    pub fn new(stream: TcpStream) -> Self {
+        Self { inner: BufReader::new(stream), buffer: Vec::new() }
+    }
+    pub fn next(&mut self) -> io::Result<Result<Vec<Resp>, Resp>> {
+        let n = self.inner.read(&mut self.buffer)?;
+        if n == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "Connection closed",
+            ));
+        }
+        match Resp::parse(&self.buffer) {
+            Ok(r) => Ok(Ok(r)),
+            Err(r) => Ok(Err(r))
+        }
+    }
+}
+
 //TODO check if data is incomplete buffer incomplete data and discard corrupted data
 fn parse(data: &[u8]) -> Result<Vec<Command>, Resp> {
     let resps = Resp::parse(data)?;
@@ -130,7 +159,7 @@ fn try_read(buf_reader: &mut BufReader<TcpStream>) -> io::Result<Vec<u8>> {
                 return Err(io::Error::new(
                     io::ErrorKind::ConnectionAborted,
                     "Connection closed",
-                ))
+                ));
             }
             Ok(size) => {
                 buffer.extend_from_slice(&buf[..size]);
@@ -144,6 +173,7 @@ fn try_read(buf_reader: &mut BufReader<TcpStream>) -> io::Result<Vec<u8>> {
     }
     Ok(buffer)
 }
+
 mod tests {
     use std::error::Error;
 
@@ -152,6 +182,7 @@ mod tests {
     use crate::dictionary::Dictionary;
 
     use super::*;
+
     struct TestCase {
         command: Box<dyn FnOnce(&mut redis::Connection) -> redis::RedisResult<redis::Value>>,
         want: redis::Value,

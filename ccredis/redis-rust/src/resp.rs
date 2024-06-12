@@ -50,6 +50,7 @@ impl Display for Resp {
         write!(f, "{}", String::from(self))
     }
 }
+
 impl From<&Resp> for String {
     fn from(value: &Resp) -> Self {
         let mut string = String::new();
@@ -151,6 +152,7 @@ fn parse_resp(value: &[u8]) -> (Option<Resp>, &[u8]) {
         _ => (None, value),
     }
 }
+
 fn parse_simple_string(value: &[u8]) -> (Option<Resp>, &[u8]) {
     let pos = value.iter().position(|b| *b == b'\r');
     if pos.is_none() {
@@ -164,6 +166,7 @@ fn parse_simple_string(value: &[u8]) -> (Option<Resp>, &[u8]) {
     let text = String::from_utf8_lossy(data).to_string();
     (Some(Resp::SimpleString(text)), &remaining[2..])
 }
+
 fn parse_simple_error(value: &[u8]) -> (Option<Resp>, &[u8]) {
     match parse_simple_string(value) {
         (Some(Resp::SimpleString(s)), r) => (Some(Resp::SimpleError(s)), r),
@@ -275,6 +278,7 @@ mod tests {
             _ => Err("Should be null"),
         }
     }
+
     #[test]
     fn parse_array() -> Result<(), &'static str> {
         let input = "*1\r\n$4\r\nping\r\n";
@@ -316,6 +320,7 @@ mod tests {
             _ => Err("Should be of type array"),
         }
     }
+
     #[test]
     fn parse_array3() -> Result<(), &'static str> {
         let input = "*2\r\n$3\r\nget\r\n$3\r\nkey\r\n";
@@ -336,9 +341,10 @@ mod tests {
             _ => Err("Should be of type array"),
         }
     }
+
     #[test]
     fn parse_array4() -> Result<(), &'static str> {
-        let input ="*3\r\n$6\r\nCONFIG\r\n$3\r\nGET\r\n$4\r\nsave\r\n*3\r\n$6\r\nCONFIG\r\n$3\r\nGET\r\n$10\r\nappendonly\r\n";
+        let input = "*3\r\n$6\r\nCONFIG\r\n$3\r\nGET\r\n$4\r\nsave\r\n*3\r\n$6\r\nCONFIG\r\n$3\r\nGET\r\n$10\r\nappendonly\r\n";
         match parse_resp(input.as_bytes()) {
             (Some(Resp::Array(arr)), r) => {
                 assert_eq!(arr.len(), 3);
@@ -379,6 +385,7 @@ mod tests {
             _ => Err("Should be of type array"),
         }
     }
+
     #[test]
     fn parse_simple_string() -> Result<(), &'static str> {
         let input = "+OK\r\n";
@@ -390,6 +397,7 @@ mod tests {
             _ => Err("Should be of type simple string"),
         }
     }
+
     #[test]
     fn parse_simple_error() -> Result<(), &'static str> {
         let input = "-ERROR message\r\n";
@@ -413,6 +421,7 @@ mod tests {
             _ => Err("Should be of type bulk string"),
         }
     }
+
     #[test]
     fn parse_simple_string2() -> Result<(), &'static str> {
         let input = "+hello world\r\n";
