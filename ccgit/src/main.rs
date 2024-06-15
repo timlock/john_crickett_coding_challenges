@@ -20,7 +20,7 @@ fn main() {
 fn init(path: &str) -> io::Result<()> {
     let mut path = path::PathBuf::from(path);
     fs::create_dir(".git")?;
-    HeadFile::new(path);
+    HeadFile::new(path)?;
     println!("Initialized empty Git repository in {path}");
     Ok(())
 }
